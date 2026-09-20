@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext';
 import { 
   LogOut, Calendar, Users, Scissors, UserCheck, Clock, 
   Plus, Trash2, Edit, Check, X, BarChart3,
-  TrendingUp, DollarSign
+  TrendingUp, DollarSign, Loader2, RefreshCw
 } from 'lucide-react';
 import { format, parseISO, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -16,11 +16,11 @@ type AdminTab = 'dashboard' | 'appointments' | 'services' | 'barbers';
 
 export default function AdminPage({ onNavigate }: AdminPageProps) {
   const { 
-    appointments, services, barbers, 
+    appointments, services, barbers, adminUser,
     updateAppointmentStatus, deleteAppointment,
     addService, updateService, deleteService,
     addBarber, updateBarber, deleteBarber,
-    logoutAdmin
+    logoutAdmin, refreshData
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
@@ -29,15 +29,23 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
   const [editingService, setEditingService] = useState<any>(null);
   const [editingBarber, setEditingBarber] = useState<any>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Service form state
   const [serviceForm, setServiceForm] = useState({ name: '', duration: 30, price: 0, description: '', icon: 'scissors' });
   // Barber form state
   const [barberForm, setBarberForm] = useState({ name: '', specialty: '', avatar: '💈', available: true });
+  const [isSaving, setIsSaving] = useState(false);
 
   const handleLogout = () => {
     logoutAdmin();
     onNavigate('home');
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await refreshData();
+    setIsRefreshing(false);
   };
 
   const filteredAppointments = filterStatus === 'all' 
@@ -65,26 +73,58 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       return sum + (service?.price || 0);
     }, 0);
 
-  const handleSaveService = () => {
-    if (editingService) {
-      updateService({ ...editingService, ...serviceForm });
-    } else {
-      addService(serviceForm);
+  const handleSaveService = async () => {
+    setIsSaving(true);
+    try {
+      if (editingService) {
+        await updateService({ ...editingService, ...serviceForm });
+      } else {
+        await addService(serviceForm);
+      }
+      setShowServiceModal(false);
+      setEditingService(null);
+      setServiceForm({ name: '', duration: 30, price: 0, description: '', icon: 'scissors' });
+    } catch (err) {
+      console.error('Error saving service:', err);
+    } finally {
+      setIsSaving(false);
     }
-    setShowServiceModal(false);
-    setEditingService(null);
-    setServiceForm({ name: '', duration: 30, price: 0, description: '', icon: 'scissors' });
   };
 
-  const handleSaveBarber = () => {
-    if (editingBarber) {
-      updateBarber({ ...editingBarber, ...barberForm });
-    } else {
-      addBarber(barberForm);
+  const handleSaveBarber = async () => {
+    setIsSaving(true);
+    try {
+      if (editingBarber) {
+        await updateBarber({ ...editingBarber, ...barberForm });
+      } else {
+        await addBarber(barberForm);
+      }
+      setShowBarberModal(false);
+      setEditingBarber(null);
+      setBarberForm({ name: '', specialty: '', avatar: '💈', available: true });
+    } catch (err) {
+      console.error('Error saving barber:', err);
+    } finally {
+      setIsSaving(false);
     }
-    setShowBarberModal(false);
-    setEditingBarber(null);
-    setBarberForm({ name: '', specialty: '', avatar: '💈', available: true });
+  };
+
+  const handleDeleteAppointment = async (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este agendamento?')) {
+      await deleteAppointment(id);
+    }
+  };
+
+  const handleDeleteService = async (id: string) => {
+    if (confirm('Tem certeza que deseja desativar este serviço?')) {
+      await deleteService(id);
+    }
+  };
+
+  const handleDeleteBarber = async (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este barbeiro?')) {
+      await deleteBarber(id);
+    }
   };
 
   const tabs = [
@@ -103,16 +143,29 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
             <div className="w-8 h-8 bg-gradient-to-br from-amber-500 to-amber-600 rounded-lg flex items-center justify-center">
               <span className="text-zinc-900 font-bold text-sm">B</span>
             </div>
-            <h1 className="text-lg font-bold hidden sm:block">BarberPro <span className="text-amber-500">Admin</span></h1>
+            <div className="hidden sm:block">
+              <h1 className="text-lg font-bold leading-tight">BarberPro <span className="text-amber-500">Admin</span></h1>
+              {adminUser && <p className="text-zinc-500 text-xs">Olá, {adminUser.name}</p>}
+            </div>
           </div>
           
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 text-zinc-400 hover:text-red-400 transition-colors text-sm"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sair</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-colors disabled:opacity-50"
+              title="Atualizar dados"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-zinc-400 hover:text-red-400 transition-colors text-sm"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -330,7 +383,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                             </button>
                           )}
                           <button
-                            onClick={() => deleteAppointment(apt.id)}
+                            onClick={() => handleDeleteAppointment(apt.id)}
                             className="flex items-center gap-1 bg-zinc-700/50 text-zinc-400 border border-zinc-600/50 px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 transition-colors"
                           >
                             <Trash2 className="w-3.5 h-3.5" /> Excluir
@@ -375,7 +428,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                         <Edit className="w-4 h-4" />
                       </button>
                       <button
-                        onClick={() => deleteService(service.id)}
+                        onClick={() => handleDeleteService(service.id)}
                         className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -429,7 +482,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                       <Edit className="w-3.5 h-3.5" /> Editar
                     </button>
                     <button
-                      onClick={() => deleteBarber(barber.id)}
+                      onClick={() => handleDeleteBarber(barber.id)}
                       className="flex items-center gap-1 bg-zinc-700/50 text-zinc-300 px-3 py-1.5 rounded-lg text-sm hover:bg-red-500/10 hover:text-red-400 transition-colors"
                     >
                       <Trash2 className="w-3.5 h-3.5" /> Excluir
@@ -445,7 +498,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       {/* Service Modal */}
       {showServiceModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-md">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-md animate-scaleIn">
             <h3 className="text-xl font-bold mb-6">{editingService ? 'Editar' : 'Novo'} Serviço</h3>
             
             <div className="space-y-4">
@@ -498,9 +551,10 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               </button>
               <button
                 onClick={handleSaveService}
-                disabled={!serviceForm.name || !serviceForm.price}
-                className="flex-1 bg-amber-500 text-zinc-900 font-medium py-2 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-50"
+                disabled={!serviceForm.name || !serviceForm.price || isSaving}
+                className="flex-1 bg-amber-500 text-zinc-900 font-medium py-2 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Salvar
               </button>
             </div>
@@ -511,7 +565,7 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
       {/* Barber Modal */}
       {showBarberModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-md">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl p-6 w-full max-w-md animate-scaleIn">
             <h3 className="text-xl font-bold mb-6">{editingBarber ? 'Editar' : 'Novo'} Barbeiro</h3>
             
             <div className="space-y-4">
@@ -534,11 +588,12 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
                 />
               </div>
               <div>
-                <label className="block text-zinc-300 text-sm mb-1">Avatar (emoji)</label>
+                <label className="block text-zinc-300 text-sm mb-2">Avatar</label>
                 <div className="flex gap-2">
                   {['💈', '👨‍🦱', '🧔', '👨', '🧑‍🦰', '👨‍🦳'].map((emoji) => (
                     <button
                       key={emoji}
+                      type="button"
                       onClick={() => setBarberForm({ ...barberForm, avatar: emoji })}
                       className={`text-2xl p-2 rounded-lg transition-colors ${barberForm.avatar === emoji ? 'bg-amber-500/20 border border-amber-500' : 'bg-zinc-800 border border-zinc-700 hover:border-zinc-600'}`}
                     >
@@ -550,10 +605,11 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               <div className="flex items-center gap-3">
                 <label className="text-zinc-300 text-sm">Disponível:</label>
                 <button
+                  type="button"
                   onClick={() => setBarberForm({ ...barberForm, available: !barberForm.available })}
-                  className={`w-12 h-6 rounded-full transition-colors ${barberForm.available ? 'bg-green-500' : 'bg-zinc-700'}`}
+                  className={`w-12 h-6 rounded-full transition-colors relative ${barberForm.available ? 'bg-green-500' : 'bg-zinc-700'}`}
                 >
-                  <div className={`w-5 h-5 bg-white rounded-full transition-transform ${barberForm.available ? 'translate-x-6' : 'translate-x-0.5'}`}></div>
+                  <div className={`w-5 h-5 bg-white rounded-full absolute top-0.5 transition-all ${barberForm.available ? 'left-6' : 'left-0.5'}`}></div>
                 </button>
               </div>
             </div>
@@ -567,9 +623,10 @@ export default function AdminPage({ onNavigate }: AdminPageProps) {
               </button>
               <button
                 onClick={handleSaveBarber}
-                disabled={!barberForm.name}
-                className="flex-1 bg-amber-500 text-zinc-900 font-medium py-2 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-50"
+                disabled={!barberForm.name || isSaving}
+                className="flex-1 bg-amber-500 text-zinc-900 font-medium py-2 rounded-lg hover:bg-amber-400 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
+                {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 Salvar
               </button>
             </div>

@@ -25,7 +25,7 @@ export interface Appointment {
   date: string;
   time: string;
   status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
-  createdAt: string;
+  createdAt?: string;
   notes?: string;
 }
 
