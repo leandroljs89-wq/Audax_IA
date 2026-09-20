@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { ArrowLeft, Calendar, Clock, User, Scissors, Check, ChevronLeft, ChevronRight, Phone as PhoneIcon } from 'lucide-react';
+import { ArrowLeft, Calendar, Clock, User, Scissors, Check, ChevronLeft, ChevronRight, Phone as PhoneIcon, Loader2 } from 'lucide-react';
 import { format, addDays, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -21,6 +21,9 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
   const [clientEmail, setClientEmail] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const getWeekDays = () => {
     const today = startOfDay(new Date());
@@ -34,26 +37,51 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
     return days;
   };
 
-  const availableSlots = selectedDate && selectedBarber 
-    ? getAvailableSlots(selectedDate, selectedBarber) 
-    : [];
+  // Fetch available slots when date or barber changes
+  useEffect(() => {
+    if (selectedDate && selectedBarber) {
+      const fetchSlots = async () => {
+        setLoadingSlots(true);
+        try {
+          const slots = await getAvailableSlots(selectedDate, selectedBarber);
+          setAvailableSlots(slots);
+        } catch (err) {
+          setAvailableSlots([]);
+        } finally {
+          setLoadingSlots(false);
+        }
+      };
+      fetchSlots();
+    } else {
+      setAvailableSlots([]);
+    }
+  }, [selectedDate, selectedBarber, getAvailableSlots]);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!selectedService || !selectedBarber || !selectedDate || !selectedTime || !clientName || !clientPhone) {
       return;
     }
 
-    addAppointment({
-      clientName,
-      clientPhone,
-      clientEmail,
-      serviceId: selectedService,
-      barberId: selectedBarber,
-      date: selectedDate,
-      time: selectedTime,
-    });
+    setIsSubmitting(true);
+    try {
+      const success = await addAppointment({
+        clientName,
+        clientPhone,
+        clientEmail,
+        serviceId: selectedService,
+        barberId: selectedBarber,
+        date: selectedDate,
+        time: selectedTime,
+      });
 
-    setShowSuccess(true);
+      if (success) {
+        setShowSuccess(true);
+      }
+    } catch (err) {
+      console.error('Error creating appointment:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const resetBooking = () => {
@@ -74,8 +102,8 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
     
     return (
       <div className="min-h-screen bg-zinc-950 text-white flex items-center justify-center px-4">
-        <div className="max-w-md w-full text-center">
-          <div className="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-8">
+        <div className="max-w-md w-full text-center animate-fadeIn">
+          <div className="w-24 h-24 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-8 border border-green-500/30">
             <Check className="w-12 h-12 text-green-400" />
           </div>
           <h2 className="text-3xl font-bold mb-4" style={{ fontFamily: 'Playfair Display, serif' }}>
@@ -100,9 +128,9 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
               <span className="text-zinc-400">Horário:</span>
               <span className="text-white font-medium">{selectedTime}</span>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between border-t border-zinc-700 pt-3 mt-3">
               <span className="text-zinc-400">Valor:</span>
-              <span className="text-amber-400 font-bold">R$ {service?.price.toFixed(2)}</span>
+              <span className="text-amber-400 font-bold text-lg">R$ {service?.price.toFixed(2)}</span>
             </div>
           </div>
 
@@ -288,9 +316,14 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
                   <Clock className="w-5 h-5 text-amber-500" /> Horário Disponível
                 </h3>
                 
-                {availableSlots.length > 0 ? (
+                {loadingSlots ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 text-amber-500 animate-spin" />
+                    <span className="ml-2 text-zinc-400">Carregando horários...</span>
+                  </div>
+                ) : availableSlots.length > 0 ? (
                   <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                    {availableSlots.map((slot) => (
+                    {availableSlots.map((slot: string) => (
                       <button
                         key={slot}
                         onClick={() => { setSelectedTime(slot); setStep(4); }}
@@ -393,10 +426,17 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
 
             <button
               onClick={handleSubmit}
-              disabled={!clientName || !clientPhone}
-              className="w-full mt-8 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-900 font-bold py-4 rounded-xl text-lg hover:from-amber-400 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!clientName || !clientPhone || isSubmitting}
+              className="w-full mt-8 bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-900 font-bold py-4 rounded-xl text-lg hover:from-amber-400 hover:to-amber-500 transition-all duration-300 shadow-lg shadow-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
-              Confirmar Agendamento
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Agendando...
+                </>
+              ) : (
+                'Confirmar Agendamento'
+              )}
             </button>
           </div>
         )}
@@ -404,5 +444,3 @@ export default function BookingPage({ onNavigate }: BookingPageProps) {
     </div>
   );
 }
-
-
