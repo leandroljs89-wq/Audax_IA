@@ -7,12 +7,40 @@ interface AdminUser {
   email: string;
   name: string;
   role: string;
+  barber_id?: string;
+}
+
+interface SystemUser {
+  id: string;
+  email: string;
+  name: string;
+  role: 'admin' | 'barber' | 'manager';
+  barber_id?: string;
+  active: boolean;
+  last_login?: string;
+  created_at: string;
+  barber_name?: string;
+  barber_specialty?: string;
+}
+
+interface Client {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  total_appointments: number;
+  total_spent: number;
+  notes?: string;
+  created_at: string;
+  last_appointment?: string;
 }
 
 interface AppContextType {
   services: Service[];
   barbers: Barber[];
   appointments: Appointment[];
+  systemUsers: SystemUser[];
+  clients: Client[];
   isAdminLoggedIn: boolean;
   adminUser: AdminUser | null;
   loading: boolean;
@@ -29,6 +57,15 @@ interface AppContextType {
   logoutAdmin: () => void;
   getAvailableSlots: (date: string, barberId: string) => Promise<string[]>;
   refreshData: () => Promise<void>;
+  // Gestão de Usuários
+  addSystemUser: (user: { email: string; password: string; name: string; role: string; barber_id?: string }) => Promise<boolean>;
+  updateSystemUser: (id: string, data: Partial<SystemUser>) => Promise<void>;
+  deleteSystemUser: (id: string) => Promise<void>;
+  updateUserPassword: (id: string, newPassword: string) => Promise<boolean>;
+  // Gestão de Clientes
+  addClient: (client: { name: string; phone: string; email?: string }) => Promise<boolean>;
+  updateClient: (id: string, data: Partial<Client>) => Promise<void>;
+  deleteClient: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -37,6 +74,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [services, setServices] = useState<Service[]>([]);
   const [barbers, setBarbers] = useState<Barber[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
   const [adminUser, setAdminUser] = useState<AdminUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,16 +140,64 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const fetchSystemUsers = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('v_system_users')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (!error && data) {
+      setSystemUsers(data.map((u: any) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        barber_id: u.barber_id,
+        active: u.active,
+        last_login: u.last_login,
+        created_at: u.created_at,
+        barber_name: u.barber_name,
+        barber_specialty: u.barber_specialty,
+      })));
+    }
+  }, []);
+
+  const fetchClients = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('v_clients_stats')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (!error && data) {
+      setClients(data.map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        phone: c.phone,
+        email: c.email,
+        total_appointments: c.total_appointments || 0,
+        total_spent: parseFloat(c.total_spent) || 0,
+        notes: c.notes,
+        created_at: c.created_at,
+        last_appointment: c.last_appointment,
+      })));
+    }
+  }, []);
+
   const refreshData = useCallback(async () => {
-    await Promise.all([fetchServices(), fetchBarbers(), fetchAppointments()]);
-  }, [fetchServices, fetchBarbers, fetchAppointments]);
+    await Promise.all([
+      fetchServices(), 
+      fetchBarbers(), 
+      fetchAppointments(),
+      fetchSystemUsers(),
+      fetchClients()
+    ]);
+  }, [fetchServices, fetchBarbers, fetchAppointments, fetchSystemUsers, fetchClients]);
 
   useEffect(() => {
     const init = async () => {
       setLoading(true);
       await refreshData();
       
-      // Check if admin is logged in (session)
       const session = sessionStorage.getItem('barber_admin_session');
       if (session) {
         try {
@@ -148,7 +235,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return false;
     }
     
+    // Criar/atualizar cliente automaticamente
+    await supabase.rpc('upsert_client', {
+      p_name: appointment.clientName,
+      p_phone: appointment.clientPhone,
+      p_email: appointment.clientEmail || null
+    });
+    
     await fetchAppointments();
+    await fetchClients();
     return true;
   };
 
@@ -159,6 +254,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .eq('id', id);
     
     await fetchAppointments();
+    if (status === 'completed') {
+      await fetchClients();
+    }
   };
 
   const deleteAppointment = async (id: string) => {
@@ -247,7 +345,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loginAdmin = async (email: string, password: string): Promise<boolean> => {
     const { data, error } = await supabase
-      .rpc('verify_admin_login', { p_email: email, p_password: password });
+      .rpc('login_system_user', { p_email: email, p_password: password });
     
     if (error) {
       console.error('Login error:', error);
@@ -260,6 +358,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         email: data[0].email,
         name: data[0].name,
         role: data[0].role,
+        barber_id: data[0].barber_id,
       };
       setAdminUser(user);
       setIsAdminLoggedIn(true);
@@ -282,7 +381,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     
     if (error) {
       console.error('Error getting slots:', error);
-      // Fallback: calcular no frontend
       return calculateAvailableSlotsFallback(date, barberId);
     }
     
@@ -310,13 +408,113 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return allSlots.filter(slot => !bookedSlots.includes(slot));
   };
 
+  // Gestão de Usuários do Sistema
+  const addSystemUser = async (user: { email: string; password: string; name: string; role: string; barber_id?: string }): Promise<boolean> => {
+    const { data, error } = await supabase.rpc('create_system_user', {
+      p_email: user.email,
+      p_password: user.password,
+      p_name: user.name,
+      p_role: user.role,
+      p_barber_id: user.barber_id || null
+    });
+    
+    if (error) {
+      console.error('Error creating user:', error);
+      return false;
+    }
+    
+    await fetchSystemUsers();
+    return true;
+  };
+
+  const updateSystemUser = async (id: string, userData: Partial<SystemUser>) => {
+    await supabase
+      .from('system_users')
+      .update({
+        name: userData.name,
+        email: userData.email,
+        role: userData.role,
+        barber_id: userData.barber_id,
+        active: userData.active,
+      })
+      .eq('id', id);
+    
+    await fetchSystemUsers();
+  };
+
+  const deleteSystemUser = async (id: string) => {
+    await supabase
+      .from('system_users')
+      .delete()
+      .eq('id', id);
+    
+    await fetchSystemUsers();
+  };
+
+  const updateUserPassword = async (id: string, newPassword: string): Promise<boolean> => {
+    const { error } = await supabase.rpc('update_user_password', {
+      p_user_id: id,
+      p_new_password: newPassword
+    });
+    
+    if (error) {
+      console.error('Error updating password:', error);
+      return false;
+    }
+    
+    return true;
+  };
+
+  // Gestão de Clientes
+  const addClient = async (client: { name: string; phone: string; email?: string }): Promise<boolean> => {
+    const { error } = await supabase.rpc('upsert_client', {
+      p_name: client.name,
+      p_phone: client.phone,
+      p_email: client.email || null
+    });
+    
+    if (error) {
+      console.error('Error creating client:', error);
+      return false;
+    }
+    
+    await fetchClients();
+    return true;
+  };
+
+  const updateClient = async (id: string, clientData: Partial<Client>) => {
+    await supabase
+      .from('clients')
+      .update({
+        name: clientData.name,
+        phone: clientData.phone,
+        email: clientData.email,
+        notes: clientData.notes,
+      })
+      .eq('id', id);
+    
+    await fetchClients();
+  };
+
+  const deleteClient = async (id: string) => {
+    await supabase
+      .from('clients')
+      .delete()
+      .eq('id', id);
+    
+    await fetchClients();
+  };
+
   return (
     <AppContext.Provider value={{
-      services, barbers, appointments, isAdminLoggedIn, adminUser, loading,
+      services, barbers, appointments, systemUsers, clients,
+      isAdminLoggedIn, adminUser, loading,
       addAppointment, updateAppointmentStatus, deleteAppointment,
       addService, updateService, deleteService,
       addBarber, updateBarber, deleteBarber,
       loginAdmin, logoutAdmin, getAvailableSlots, refreshData,
+      addSystemUser, updateSystemUser, deleteSystemUser, updateUserPassword,
+      addClient, updateClient, deleteClient,
     }}>
       {children}
     </AppContext.Provider>
